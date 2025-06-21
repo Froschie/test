@@ -72,11 +72,16 @@ action:
       max_charge_entity: !input max_charge_power
       max_discharge_entity: !input max_discharge_power
 
-      grid_power_val: "{{ states(grid_power_entity) | float(0) }}"
-      battery_discharge_val: "{{ states(battery_discharge_entity) | float(0) }}"
-      soc: "{{ states(battery_soc_entity) | float(100) }}"
-      max_charge: "{{ states(max_charge_entity) | float(2500) }}"
-      max_discharge: "{{ states(max_discharge_entity) | float(800) }}"
+      grid_power_val: >
+        {{ states(grid_power_entity) | float(0) }}
+      battery_discharge_val: >
+        {{ states(battery_discharge_entity) | float(0) }}
+      soc: >
+        {{ states(battery_soc_entity) | float(100) }}
+      max_charge: >
+        {{ states(max_charge_entity) | float(2500) }}
+      max_discharge: >
+        {{ states(max_discharge_entity) | float(800) }}
 
       # Initial target before SoC or power limits
       raw_target: >
