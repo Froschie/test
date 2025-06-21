@@ -48,7 +48,7 @@ blueprint:
 
 trigger:
   - platform: time_pattern
-    seconds: "/15"
+    seconds: "/30"
 
 condition: []
 
@@ -66,14 +66,22 @@ action:
   - delay: "00:00:02"  # Short delay to allow updates to complete
 
   - variables:
-      grid_power_val: "{{ states(!input grid_power_sensor) | float(0) }}"
-      battery_discharge_val: "{{ states(!input battery_discharge) | float(0) }}"
-      soc: "{{ states(!input battery_soc) | float(100) }}"
-      max_charge: "{{ states(!input max_charge_power) | float(2500) }}"
-      max_discharge: "{{ states(!input max_discharge_power) | float(800) }}"
+      grid_power_entity: !input grid_power_sensor
+      battery_discharge_entity: !input battery_discharge
+      battery_soc_entity: !input battery_soc
+      max_charge_entity: !input max_charge_power
+      max_discharge_entity: !input max_discharge_power
+
+      grid_power_val: "{{ states(grid_power_entity) | float(0) }}"
+      battery_discharge_val: "{{ states(battery_discharge_entity) | float(0) }}"
+      soc: "{{ states(battery_soc_entity) | float(100) }}"
+      max_charge: "{{ states(max_charge_entity) | float(2500) }}"
+      max_discharge: "{{ states(max_discharge_entity) | float(800) }}"
+
       # Initial target before SoC or power limits
       raw_target: >
         {{ battery_discharge_val - grid_power_val }}
+
       # Clamp based on SoC
       soc_limited_target: >
         {% if soc <= 14 %}
@@ -83,6 +91,7 @@ action:
         {% else %}
           {{ raw_target }}
         {% endif %}
+
       # Clamp based on power limits
       new_battery_target: >
         {{ [ [soc_limited_target, max_discharge * -1] | max, max_charge ] | min }}
