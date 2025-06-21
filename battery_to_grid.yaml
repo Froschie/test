@@ -1,71 +1,102 @@
 blueprint:
   name: My Battery Grid to 0
-  description: "Adjust the battery discharge/charge power to balance the grid power to 0."
+  description: "Adjust battery discharge/charge to balance grid power to 0."
   domain: automation
   input:
-    power_to_grid:
-      name: Power to Grid Sensor
-      description: Select the sensor that represents power to the grid.
-      selector:
-        entity:
-          domain: sensor
-    power_from_grid:
-      name: Power from Grid Sensor
-      description: Select the sensor that represents power from the grid.
+    grid_power_sensor:
+      name: Grid Power Sensor
+      description: Sensor with positive values for import and negative for export.
       selector:
         entity:
           domain: sensor
     battery_discharge:
       name: Battery Discharge Sensor
-      description: Select the sensor that represents battery discharge power.
+      description: Sensor representing battery discharge power (positive = discharging).
       selector:
         entity:
           domain: sensor
     battery_target:
       name: Target Input Number
-      description: Input number to set battery charging/discharging power.
+      description: Input number to set target battery charging/discharging.
       selector:
         entity:
           domain: input_number
     battery_control_script:
       name: Battery Control Script
-      description: Script to control battery charging/discharging.
+      description: Script to apply battery charge/discharge changes.
       selector:
         entity:
           domain: script
+    battery_soc:
+      name: Battery SoC Sensor
+      description: Sensor representing battery State of Charge (%).
+      selector:
+        entity:
+          domain: sensor
+    max_charge_power:
+      name: Max Charge Power Sensor
+      description: Sensor representing maximum charge power (default 2500).
+      selector:
+        entity:
+          domain: sensor
+    max_discharge_power:
+      name: Max Discharge Power Sensor
+      description: Sensor representing maximum discharge power (default 800).
+      selector:
+        entity:
+          domain: sensor
 
 trigger:
   - platform: time_pattern
-    seconds: "/30"
+    seconds: "/15"
 
 condition: []
 
 action:
-  - variables:
-      power_to_grid: !input power_to_grid
-      power_from_grid: !input power_from_grid
-      battery_discharge: !input battery_discharge
-
-  - service: input_number.set_value
-    data:
-      value: >
-        {{
-          (states(power_to_grid) | float(0)) +
-          (states(battery_discharge) | float(0)) -
-          (states(power_from_grid) | float(0))
-        }}
-    target:
-      entity_id: !input battery_target
-
-  - service: script.turn_on
-    target:
-      entity_id: !input battery_control_script
-
+  # First, force-update relevant sensor readings
   - service: homeassistant.update_entity
     data:
       entity_id:
-        - !input power_to_grid
-        - !input power_from_grid
+        - !input grid_power_sensor
         - !input battery_discharge
+        - !input battery_soc
+        - !input max_charge_power
+        - !input max_discharge_power
+
+  - delay: "00:00:02"  # Short delay to allow updates to complete
+
+  - variables:
+      grid_power_val: "{{ states(!input grid_power_sensor) | float(0) }}"
+      battery_discharge_val: "{{ states(!input battery_discharge) | float(0) }}"
+      soc: "{{ states(!input battery_soc) | float(100) }}"
+      max_charge: "{{ states(!input max_charge_power) | float(2500) }}"
+      max_discharge: "{{ states(!input max_discharge_power) | float(800) }}"
+      # Initial target before SoC or power limits
+      raw_target: >
+        {{ battery_discharge_val - grid_power_val }}
+      # Clamp based on SoC
+      soc_limited_target: >
+        {% if soc <= 14 %}
+          {{ [raw_target, 0] | max }}  {# prevent discharge #}
+        {% elif soc >= 92 %}
+          {{ [raw_target, 0] | min }}  {# prevent charge #}
+        {% else %}
+          {{ raw_target }}
+        {% endif %}
+      # Clamp based on power limits
+      new_battery_target: >
+        {{ [ [soc_limited_target, max_discharge * -1] | max, max_charge ] | min }}
+
+  # Set the input number to calculated battery target
+  - service: input_number.set_value
+    data:
+      value: "{{ new_battery_target | round(2) }}"
+    target:
+      entity_id: !input battery_target
+
+  # Call the script to apply the target to the battery
+  - service: script.turn_on
+    target:
+      entity_id: !input battery_control_script
 
 mode: single
