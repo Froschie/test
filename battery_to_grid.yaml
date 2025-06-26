@@ -1,6 +1,6 @@
 blueprint:
   name: My Battery Grid to 0
-  description: "Adjust battery discharge/charge to balance grid power to 0."
+  description: "Adjust battery discharge/charge to balance grid power to 0. Includes configurable SoC limits."
   domain: automation
   input:
     grid_power_sensor:
@@ -45,6 +45,18 @@ blueprint:
       selector:
         entity:
           domain: sensor
+    max_soc_charging:
+      name: Max SoC Charging
+      description: Input number defining maximum allowed SoC for charging (%).
+      selector:
+        entity:
+          domain: input_number
+    min_soc_discharging:
+      name: Min SoC Discharging
+      description: Input number defining minimum allowed SoC for discharging (%).
+      selector:
+        entity:
+          domain: input_number
 
 trigger:
   - platform: time_pattern
@@ -62,6 +74,8 @@ action:
         - !input battery_soc
         - !input max_charge_power
         - !input max_discharge_power
+        - !input max_soc_charging
+        - !input min_soc_discharging
 
   - delay: "00:00:02"  # Short delay to allow updates to complete
 
@@ -71,6 +85,8 @@ action:
       battery_soc_entity: !input battery_soc
       max_charge_entity: !input max_charge_power
       max_discharge_entity: !input max_discharge_power
+      max_soc_charging_entity: !input max_soc_charging
+      min_soc_discharging_entity: !input min_soc_discharging
 
       grid_power_val: >
         {{ states(grid_power_entity) | float(0) }}
@@ -82,6 +98,10 @@ action:
         {{ states(max_charge_entity) | float(2500) }}
       max_discharge: >
         {{ states(max_discharge_entity) | float(800) }}
+      max_soc_charging_val: >
+        {{ states(max_soc_charging_entity) | float(92) }}
+      min_soc_discharging_val: >
+        {{ states(min_soc_discharging_entity) | float(14) }}
 
       # Initial target before SoC or power limits
       raw_target: >
@@ -89,9 +109,9 @@ action:
 
       # Clamp based on SoC
       soc_limited_target: >
-        {% if soc <= 14 %}
+        {% if soc <= min_soc_discharging_val %}
           {{ [raw_target, 0] | max }}  {# prevent discharge #}
-        {% elif soc >= 92 %}
+        {% elif soc >= max_soc_charging_val %}
           {{ [raw_target, 0] | min }}  {# prevent charge #}
         {% else %}
           {{ raw_target }}
