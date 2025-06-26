@@ -1,6 +1,6 @@
 blueprint:
   name: My Battery Grid to 0
-  description: "Adjust battery discharge/charge to balance grid power to 0. Includes configurable SoC limits."
+  description: "Adjust battery discharge/charge to balance grid power to 0. Includes configurable SoC and charging power limits."
   domain: automation
   input:
     grid_power_sensor:
@@ -57,15 +57,26 @@ blueprint:
       selector:
         entity:
           domain: input_number
+    min_charging:
+      name: Min Charging Power
+      description: Input number defining minimum charging power (positive W).
+      selector:
+        entity:
+          domain: input_number
+    max_charging:
+      name: Max Charging Power
+      description: Input number defining maximum charging power (positive W).
+      selector:
+        entity:
+          domain: input_number
 
 trigger:
   - platform: time_pattern
-    seconds: "/30"
+    seconds: "/10"
 
 condition: []
 
 action:
-  # First, force-update relevant sensor readings
   - service: homeassistant.update_entity
     data:
       entity_id:
@@ -76,8 +87,10 @@ action:
         - !input max_discharge_power
         - !input max_soc_charging
         - !input min_soc_discharging
+        - !input min_charging
+        - !input max_charging
 
-  - delay: "00:00:02"  # Short delay to allow updates to complete
+  - delay: "00:00:02"
 
   - variables:
       grid_power_entity: !input grid_power_sensor
@@ -87,6 +100,8 @@ action:
       max_discharge_entity: !input max_discharge_power
       max_soc_charging_entity: !input max_soc_charging
       min_soc_discharging_entity: !input min_soc_discharging
+      min_charging_entity: !input min_charging
+      max_charging_entity: !input max_charging
 
       grid_power_val: >
         {{ states(grid_power_entity) | float(0) }}
@@ -102,6 +117,10 @@ action:
         {{ states(max_soc_charging_entity) | float(92) }}
       min_soc_discharging_val: >
         {{ states(min_soc_discharging_entity) | float(14) }}
+      min_charging_val: >
+        {{ states(min_charging_entity) | float(0) }}
+      max_charging_val: >
+        {{ states(max_charging_entity) | float(2500) }}
 
       # Initial target before SoC or power limits
       raw_target: >
@@ -118,17 +137,23 @@ action:
         {% endif %}
 
       # Clamp based on power limits
-      new_battery_target: >
+      power_limited_target: >
         {{ [ [soc_limited_target, max_discharge * -1] | max, max_charge ] | min }}
 
-  # Set the input number to calculated battery target
+      # Apply min/max charging logic
+      new_battery_target: >
+        {% if power_limited_target > 0 %}
+          {{ [power_limited_target, min_charging_val] | max if power_limited_target >= min_charging_val else 0 }}
+        {% else %}
+          {{ power_limited_target }}
+        {% endif %}
+
   - service: input_number.set_value
     data:
       value: "{{ new_battery_target | round(2) }}"
     target:
       entity_id: !input battery_target
 
-  # Call the script to apply the target to the battery
   - service: script.turn_on
     target:
       entity_id: !input battery_control_script
